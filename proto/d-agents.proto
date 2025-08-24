@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/nieveai/d-agents/proto";
+
+message Workload {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  bytes payload = 4;
+}
+
+message WorkloadStatus {
+  string workload_id = 1;
+  enum Status {
+    UNKNOWN = 0;
+    PENDING = 1;
+    RUNNING = 2;
+    COMPLETED = 3;
+    FAILED = 4;
+  }
+  Status status = 2;
+  string message = 3;
+}
+
+service Worker {
+  rpc ExecuteWorkload(Workload) returns (WorkloadStatus);
+}
