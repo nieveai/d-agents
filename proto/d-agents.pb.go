@@ -81,7 +81,9 @@ type Workload struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
-	Payload       []byte                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	Description   string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
+	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -137,11 +139,25 @@ func (x *Workload) GetType() string {
 	return ""
 }
 
+func (x *Workload) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
 func (x *Workload) GetPayload() []byte {
 	if x != nil {
 		return x.Payload
 	}
 	return nil
+}
+
+func (x *Workload) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
 }
 
 type WorkloadStatus struct {
@@ -208,12 +224,14 @@ var File_proto_d_agents_proto protoreflect.FileDescriptor
 
 const file_proto_d_agents_proto_rawDesc = "" +
 	"\n" +
-	"\x14proto/d-agents.proto\x12\x05proto\"\\\n" +
+	"\x14proto/d-agents.proto\x12\x05proto\"\x9c\x01\n" +
 	"\bWorkload\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04type\x18\x03 \x01(\tR\x04type\x12\x18\n" +
-	"\apayload\x18\x04 \x01(\fR\apayload\"\xcd\x01\n" +
+	"\x04type\x18\x03 \x01(\tR\x04type\x12 \n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x18\n" +
+	"\apayload\x18\x05 \x01(\fR\apayload\x12\x1c\n" +
+	"\ttimestamp\x18\x06 \x01(\x03R\ttimestamp\"\xcd\x01\n" +
 	"\x0eWorkloadStatus\x12\x1f\n" +
 	"\vworkload_id\x18\x01 \x01(\tR\n" +
 	"workloadId\x124\n" +

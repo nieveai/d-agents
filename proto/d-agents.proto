@@ -8,7 +8,9 @@ message Workload {
   string id = 1;
   string name = 2;
   string type = 3;
-  bytes payload = 4;
+  string description = 4;
+  bytes payload = 5;
+  int64 timestamp = 6;
 }
 
 message WorkloadStatus {

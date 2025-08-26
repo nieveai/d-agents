@@ -18,17 +18,17 @@ import (
 )
 
 type Config struct {
-	Workers       int    `json:"workers"`
-	GeminiAPIKey string `json:"gemini_api_key"`
+	Workers int `json:"workers"`
 }
 
 var agents = make(map[string]*models.Agent)
+var modelStore = make(map[string]*models.Model)
 var sessions = make(map[string]*pb.Workload)
 var currentSession *pb.Workload
 var inPayloadInputMode = false
 var payloadBuffer strings.Builder
 
-type Command func(workloadChan chan<- *pb.Workload, args []string)
+type Command func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string)
 
 var commands map[string]Command
 
@@ -44,12 +44,6 @@ func main() {
 		defer configFile.Close()
 		jsonParser := json.NewDecoder(configFile)
 		jsonParser.Decode(config)
-	}
-
-	if config.GeminiAPIKey != "" {
-		if err := worker.Init(context.Background(), config.GeminiAPIKey); err != nil {
-			log.Fatalf("Error initializing worker: %s", err)
-		}
 	}
 
 	numWorkers := config.Workers
@@ -78,22 +72,42 @@ func main() {
 		agents[agent.ID] = agent
 	}
 
+	// Load sessions from database
+	dbSessions, err := db.ListSessions()
+	if err != nil {
+		log.Printf("Error loading sessions from database: %s", err)
+	}
+	for _, session := range dbSessions {
+		sessions[session.Id] = session
+	}
+
+	// Load models from database
+	dbModels, err := db.ListModels()
+	if err != nil {
+		log.Printf("Error loading models from database: %s", err)
+	}
+	for _, model := range dbModels {
+		modelStore[model.ID] = model
+	}
+
 	commands = map[string]Command{
-		"/help": func(workloadChan chan<- *pb.Workload, args []string) {
+		"/help": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
 			fmt.Println("Available commands:")
 			fmt.Println("  /help - Show this help message")
 			fmt.Println("  /list agent - List all registered agents")
 			fmt.Println("  /list session - List all created sessions")
+			fmt.Println("  /list model - List all registered models")
 			fmt.Println("  /add agent @<filename> - Add an agent from a configuration file")
+			fmt.Println("  /add model @<filename> - Add a model from a configuration file")
 			fmt.Println("  /session start <agent-id> - Create a new agent workload")
 			fmt.Println("  /session run [session-id] - Run the current session or a specific session by ID")
 			fmt.Println("  /session save - Save the current session")
 			fmt.Println("  /quit - Exit the program")
 		},
-		"/quit": func(workloadChan chan<- *pb.Workload, args []string) {
+		"/quit": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
 			os.Exit(0)
 		},
-		"/session": func(workloadChan chan<- *pb.Workload, args []string) {
+		"/session": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
 			if len(args) > 0 {
 				switch args[0] {
 				case "start":
@@ -110,6 +124,7 @@ func main() {
 							Id:      workloadID,
 							Name:    agent.Name,
 							Type:    agent.ID,
+							Description: agent.Description,
 						}
 
 						sessions[workloadID] = workload
@@ -129,12 +144,14 @@ func main() {
 							fmt.Printf("Session with ID '%s' not found.\n", sessionID)
 							return
 						}
+						db.AddSession(session)
 						workloadChan <- session
 						fmt.Printf("Running session with workload ID %s\n", session.Id)
 					} else {
 						if currentSession != nil {
 							inPayloadInputMode = false
 							currentSession.Payload = []byte(payloadBuffer.String())
+							db.AddSession(currentSession)
 							workloadChan <- currentSession
 							fmt.Printf("Running session with workload ID %s\n", currentSession.Id)
 							payloadBuffer.Reset()
@@ -147,6 +164,7 @@ func main() {
 					if currentSession != nil {
 						inPayloadInputMode = false
 						currentSession.Payload = []byte(payloadBuffer.String())
+						db.AddSession(currentSession)
 						sessions[currentSession.Id] = currentSession
 						fmt.Printf("Saved session with workload ID %s\n", currentSession.Id)
 						payloadBuffer.Reset()
@@ -160,7 +178,7 @@ func main() {
 				fmt.Println("Usage: /session <start|run|save>")
 			}
 		},
-		"/list": func(workloadChan chan<- *pb.Workload, args []string) {
+		"/list": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
 			if len(args) > 0 {
 				switch args[0] {
 				case "agent":
@@ -184,49 +202,101 @@ func main() {
 						}
 						fmt.Printf("  - %s: %s\n    Payload: %s\n", session.Id, session.Name, payload)
 					}
+				case "model":
+					if len(modelStore) == 0 {
+						fmt.Println("No models registered.")
+						return
+					}
+					for _, model := range modelStore {
+						fmt.Printf("  - %s: %s/%s\n", model.ID, model.Provider, model.ModelID)
+						if model.APIURL != "" {
+							fmt.Printf("    API URL: %s\n", model.APIURL)
+						}
+						if model.APISpec != "" {
+							fmt.Printf("    API Spec: %s\n", model.APISpec)
+						}
+					}
 
 				default:
-					fmt.Println("Unknown subcommand for /list. Try '/list agent' or '/list session'")
+					fmt.Println("Unknown subcommand for /list. Try '/list agent', '/list session', or '/list model'")
 				}
 			} else {
-				fmt.Println("Usage: /list <agent|session>")
+				fmt.Println("Usage: /list <agent|session|model>")
 			}
 		},
-		"/add": func(workloadChan chan<- *pb.Workload, args []string) {
-			if len(args) > 0 && args[0] == "agent" {
-				if len(args) > 1 && strings.HasPrefix(args[1], "@") {
-					filename := strings.TrimPrefix(args[1], "@")
-					file, err := os.Open(filename)
-					if err != nil {
-						fmt.Printf("Error opening file: %s\n", err)
-						return
-					}
-					defer file.Close()
+		"/add": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
+			if len(args) > 0 {
+				switch args[0] {
+				case "agent":
+					if len(args) > 1 && strings.HasPrefix(args[1], "@") {
+						filename := strings.TrimPrefix(args[1], "@")
+						file, err := os.Open(filename)
+						if err != nil {
+							fmt.Printf("Error opening file: %s\n", err)
+							return
+						}
+						defer file.Close()
 
-					var agent models.Agent
-					decoder := json.NewDecoder(file)
-					if err := decoder.Decode(&agent); err != nil {
-						fmt.Printf("Error decoding agent file: %s\n", err)
-						return
-					}
+						var agent models.Agent
+						decoder := json.NewDecoder(file)
+						if err := decoder.Decode(&agent); err != nil {
+							fmt.Printf("Error decoding agent file: %s\n", err)
+							return
+						}
 
-					if err := db.AddAgent(&agent); err != nil {
-						fmt.Printf("Error adding agent to database: %s\n", err)
-						return
-					}
+						if err := db.AddAgent(&agent); err != nil {
+							fmt.Printf("Error adding agent to database: %s\n", err)
+							return
+						}
 
-					agents[agent.ID] = &agent
-					fmt.Printf("Agent '%s' with ID '%s' added.\n", agent.Name, agent.ID)
-				} else {
-					fmt.Println("Usage: /add agent @<filename>")
+						agents[agent.ID] = &agent
+						fmt.Printf("Agent '%s' with ID '%s' added.\n", agent.Name, agent.ID)
+					} else {
+						fmt.Println("Usage: /add agent @<filename>")
+					}
+				case "model":
+					if len(args) > 1 && strings.HasPrefix(args[1], "@") {
+						filename := strings.TrimPrefix(args[1], "@")
+						file, err := os.Open(filename)
+						if err != nil {
+							fmt.Printf("Error opening file: %s\n", err)
+							return
+						}
+						defer file.Close()
+
+						var model models.Model
+						decoder := json.NewDecoder(file)
+						if err := decoder.Decode(&model); err != nil {
+							fmt.Printf("Error decoding model file: %s\n", err)
+							return
+						}
+
+						if err := db.AddModel(&model); err != nil {
+							fmt.Printf("Error adding model to database: %s\n", err)
+							return
+						}
+
+						modelStore[model.ID] = &model
+						fmt.Printf("Model '%s' with ID '%s' added.\n", model.ModelID, model.ID)
+					} else {
+						fmt.Println("Usage: /add model @<filename>")
+					}
+				default:
+					fmt.Println("Unknown subcommand for /add. Try '/add agent' or '/add model'")
 				}
 			} else {
-				fmt.Println("Unknown subcommand for /add. Try '/add agent'")
+				fmt.Println("Usage: /add <agent|model> @<filename>")
 			}
 		},
 	}
 
 	workloadChan := make(chan *pb.Workload)
+	// init the workers.
+	for _, model := range dbModels {
+		if err := worker.Init(context.Background(), model); err != nil {
+			log.Fatalf("Error initializing worker for model %s: %s", model.ID, err)
+		}
+	}
 
 	// Start worker goroutines
 	for i := 0; i < numWorkers; i++ {
@@ -241,28 +311,19 @@ func main() {
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
-		if inPayloadInputMode {
-			if strings.HasPrefix(input, "/") {
-				parts := strings.Fields(input)
-				if cmd, ok := commands[parts[0]]; ok {
-					cmd(workloadChan, parts[1:])
-				} else {
-					fmt.Println("Unknown command. Type /help for a list of commands.")
-				}
+		if strings.HasPrefix(input, "/") {
+			parts := strings.Fields(input)
+			if cmd, ok := commands[parts[0]]; ok {
+				cmd(db, workloadChan, parts[1:])
 			} else {
-				payloadBuffer.WriteString(input)
-				payloadBuffer.WriteString("\n")
+				fmt.Println("Unknown command. Type /help for a list of commands.")
 			}
 			continue
 		}
 
-		if strings.HasPrefix(input, "/") {
-			parts := strings.Fields(input)
-			if cmd, ok := commands[parts[0]]; ok {
-				cmd(workloadChan, parts[1:])
-			} else {
-				fmt.Println("Unknown command. Type /help for a list of commands.")
-			}
+		if inPayloadInputMode {
+			payloadBuffer.WriteString(input)
+			payloadBuffer.WriteString("\n")
 			continue
 		}
 
