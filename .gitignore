@@ -18,8 +18,9 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# model config file
+# model config file, db file
 *.model.json
+*.db
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
