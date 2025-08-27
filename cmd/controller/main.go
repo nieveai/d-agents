@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/nieveai/d-agents/internal/database"
@@ -99,9 +100,10 @@ func main() {
 			fmt.Println("  /list model - List all registered models")
 			fmt.Println("  /add agent @<filename> - Add an agent from a configuration file")
 			fmt.Println("  /add model @<filename> - Add a model from a configuration file")
-			fmt.Println("  /session start <agent-id> - Create a new agent workload")
+			fmt.Println("  /session start <agent-id> <model-id1,model-id2,...> - Create a new agent workload")
 			fmt.Println("  /session run [session-id] - Run the current session or a specific session by ID")
 			fmt.Println("  /session save - Save the current session")
+			fmt.Println("  /session load <workload-id> - Load a session by ID")
 			fmt.Println("  /quit - Exit the program")
 		},
 		"/quit": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
@@ -111,20 +113,31 @@ func main() {
 			if len(args) > 0 {
 				switch args[0] {
 				case "start":
-					if len(args) > 1 {
+					if len(args) > 2 {
 						agentID := args[1]
+						modelIDsRaw := args[2]
 						agent, ok := agents[agentID]
 						if !ok {
 							fmt.Printf("Agent with ID '%s' not found.\n", agentID)
 							return
 						}
 
+						modelIDs := strings.Split(modelIDsRaw, ",")
+						for _, modelID := range modelIDs {
+							if _, ok := modelStore[modelID]; !ok {
+								fmt.Printf("Model with ID '%s' not found.\n", modelID)
+								return
+							}
+						}
+
 						workloadID := uuid.New().String()
 						workload := &pb.Workload{
-							Id:      workloadID,
-							Name:    agent.Name,
-							Type:    agent.ID,
+							Id:          workloadID,
+							Name:        agent.Name,
+							Models:      modelIDs,
 							Description: agent.Description,
+							AgentId:     agent.ID,
+							Timestamp:   time.Now().Unix(),
 						}
 
 						sessions[workloadID] = workload
@@ -133,7 +146,7 @@ func main() {
 						payloadBuffer.Reset()
 						fmt.Println("what would you like the agent to do? Please enter your instruction below.")
 					} else {
-						fmt.Println("Usage: /session start <agent-id>")
+						fmt.Println("Usage: /session start <agent-id> <model-id1,model-id2,...>")
 					}
 
 				case "run":
@@ -149,12 +162,14 @@ func main() {
 						fmt.Printf("Running session with workload ID %s\n", session.Id)
 					} else {
 						if currentSession != nil {
-							inPayloadInputMode = false
-							currentSession.Payload = []byte(payloadBuffer.String())
-							db.AddSession(currentSession)
-							workloadChan <- currentSession
-							fmt.Printf("Running session with workload ID %s\n", currentSession.Id)
-							payloadBuffer.Reset()
+                            inPayloadInputMode = false
+                            payload := payloadBuffer.String()
+                            payloadBuffer.Reset()
+
+                            currentSession.Payload = []byte(payload)
+                            db.AddSession(currentSession)
+                            workloadChan <- currentSession
+                            fmt.Printf("Running session with workload ID %s\n", currentSession.Id)
 						} else {
 							fmt.Println("No active session. Use '/session start <agent-id>' to start one.")
 						}
@@ -163,19 +178,44 @@ func main() {
 				case "save":
 					if currentSession != nil {
 						inPayloadInputMode = false
-						currentSession.Payload = []byte(payloadBuffer.String())
+						payload := payloadBuffer.String()
+						payloadBuffer.Reset()
+
+						currentSession.Payload = []byte(payload)
 						db.AddSession(currentSession)
 						sessions[currentSession.Id] = currentSession
 						fmt.Printf("Saved session with workload ID %s\n", currentSession.Id)
-						payloadBuffer.Reset()
 					} else {
 						fmt.Println("No active session. Use '/session start <agent-id>' to start one.")
 					}
+				case "load":
+					if len(args) > 1 {
+						sessionID := args[1]
+						session, err := db.GetSession(sessionID)
+						if err != nil {
+							fmt.Printf("Error loading session: %s\n", err)
+							return
+						}
+						if session == nil {
+							fmt.Printf("Session with ID '%s' not found.\n", sessionID)
+							return
+						}
+						currentSession = session
+                        sessions[session.Id] = session
+                        payloadBuffer.Reset()
+                        payloadBuffer.Write(session.Payload)
+						inPayloadInputMode = true
+                        fmt.Printf("Loaded session with ID: %s\n", session.Id)
+                        fmt.Println("Payload:")
+                        fmt.Println(string(session.Payload))
+					} else {
+						fmt.Println("Usage: /session load <workload-id>")
+					}
 				default:
-					fmt.Println("Unknown command for /session. Available commands: start, run, save")
+					fmt.Println("Unknown command for /session. Available commands: start, run, save, load")
 				}
 			} else {
-				fmt.Println("Usage: /session <start|run|save>")
+				fmt.Println("Usage: /session <start|run|save|load>")
 			}
 		},
 		"/list": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
@@ -292,10 +332,8 @@ func main() {
 
 	workloadChan := make(chan *pb.Workload)
 	// init the workers.
-	for _, model := range dbModels {
-		if err := worker.Init(context.Background(), model); err != nil {
-			log.Fatalf("Error initializing worker for model %s: %s", model.ID, err)
-		}
+	if err := worker.Init(context.Background(), dbModels, db); err != nil {
+		log.Fatalf("Error initializing worker: %s", err)
 	}
 
 	// Start worker goroutines
@@ -343,7 +381,7 @@ func main() {
 
 func runWorker(id int, workloadChan <-chan *pb.Workload) {
 	for workload := range workloadChan {
-		log.Printf("Worker %d processing workload: %s", id, workload.Type)
+		log.Printf("Worker %d processing workload: %s", id, strings.Join(workload.Models, ","))
 		worker.ProcessWorkload(workload)
 	}
 	log.Printf("Worker %d shutting down", id)

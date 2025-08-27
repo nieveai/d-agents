@@ -80,10 +80,11 @@ type Workload struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
+	Models        []string               `protobuf:"bytes,3,rep,name=models,proto3" json:"models,omitempty"`
 	Description   string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
 	Timestamp     int64                  `protobuf:"varint,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	AgentId       string                 `protobuf:"bytes,7,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -132,11 +133,11 @@ func (x *Workload) GetName() string {
 	return ""
 }
 
-func (x *Workload) GetType() string {
+func (x *Workload) GetModels() []string {
 	if x != nil {
-		return x.Type
+		return x.Models
 	}
-	return ""
+	return nil
 }
 
 func (x *Workload) GetDescription() string {
@@ -158,6 +159,13 @@ func (x *Workload) GetTimestamp() int64 {
 		return x.Timestamp
 	}
 	return 0
+}
+
+func (x *Workload) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
 }
 
 type WorkloadStatus struct {
@@ -224,14 +232,15 @@ var File_proto_d_agents_proto protoreflect.FileDescriptor
 
 const file_proto_d_agents_proto_rawDesc = "" +
 	"\n" +
-	"\x14proto/d-agents.proto\x12\x05proto\"\x9c\x01\n" +
+	"\x14proto/d-agents.proto\x12\x05proto\"\xbb\x01\n" +
 	"\bWorkload\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04type\x18\x03 \x01(\tR\x04type\x12 \n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
+	"\x06models\x18\x03 \x03(\tR\x06models\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x18\n" +
 	"\apayload\x18\x05 \x01(\fR\apayload\x12\x1c\n" +
-	"\ttimestamp\x18\x06 \x01(\x03R\ttimestamp\"\xcd\x01\n" +
+	"\ttimestamp\x18\x06 \x01(\x03R\ttimestamp\x12\x19\n" +
+	"\bagent_id\x18\a \x01(\tR\aagentId\"\xcd\x01\n" +
 	"\x0eWorkloadStatus\x12\x1f\n" +
 	"\vworkload_id\x18\x01 \x01(\tR\n" +
 	"workloadId\x124\n" +

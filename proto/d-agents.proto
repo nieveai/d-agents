@@ -7,10 +7,11 @@ option go_package = "github.com/nieveai/d-agents/proto";
 message Workload {
   string id = 1;
   string name = 2;
-  string type = 3;
+    repeated string models = 3;
   string description = 4;
   bytes payload = 5;
   int64 timestamp = 6;
+  string agent_id = 7;
 }
 
 message WorkloadStatus {
