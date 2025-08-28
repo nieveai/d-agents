@@ -138,6 +138,7 @@ func main() {
 							Description: agent.Description,
 							AgentId:     agent.ID,
 							Timestamp:   time.Now().Unix(),
+							Status:      pb.WorkloadStatus_PENDING,
 						}
 
 						sessions[workloadID] = workload
@@ -153,13 +154,14 @@ func main() {
 					if len(args) > 1 {
 						sessionID := args[1]
 						session, ok := sessions[sessionID]
-						if !ok {
-							fmt.Printf("Session with ID '%s' not found.\n", sessionID)
-							return
-						}
-						db.AddSession(session)
-						workloadChan <- session
-						fmt.Printf("Running session with workload ID %s\n", session.Id)
+                        if !ok {
+                            fmt.Printf("Session with ID '%s' not found.\n", sessionID)
+                            return
+                        }
+                        session.Status = pb.WorkloadStatus_RUNNING
+                        db.AddSession(session)
+                        workloadChan <- session
+                        fmt.Printf("Running session with workload ID %s\n", session.Id)
 					} else {
 						if currentSession != nil {
                             inPayloadInputMode = false
@@ -167,6 +169,7 @@ func main() {
                             payloadBuffer.Reset()
 
                             currentSession.Payload = []byte(payload)
+                            currentSession.Status = pb.WorkloadStatus_RUNNING
                             db.AddSession(currentSession)
                             workloadChan <- currentSession
                             fmt.Printf("Running session with workload ID %s\n", currentSession.Id)
@@ -229,19 +232,27 @@ func main() {
 					for _, agent := range agents {
 						fmt.Printf("  - %s: %s\n    Description: %s\n", agent.ID, agent.Name, agent.Description)
 					}
+
 				case "session":
-					if len(sessions) == 0 {
+					dbSessions, err := db.ListSessions()
+					if err != nil {
+						fmt.Printf("Error loading sessions from database: %s\n", err)
+						return
+					}
+					if len(dbSessions) == 0 {
 						fmt.Println("No sessions created.")
 						return
 					}
 
-					for _, session := range sessions {
+					for _, session := range dbSessions {
 						payload := string(session.Payload)
 						if len(payload) > 50 {
 							payload = payload[:50] + "..."
 						}
-						fmt.Printf("  - %s: %s\n    Payload: %s\n", session.Id, session.Name, payload)
+						fmt.Printf("  - %s: %s (%s)\n    Payload: %s\n", session.Id, session.Name, session.Status, payload)
 					}
+
+
 				case "model":
 					if len(modelStore) == 0 {
 						fmt.Println("No models registered.")

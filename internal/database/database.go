@@ -51,6 +51,7 @@ func NewSQLiteDatastore(path string) (*SQLiteDatastore, error) {
 			agent_id TEXT,
 			models TEXT,
 			payload BLOB,
+			status TEXT,
 			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
@@ -83,28 +84,35 @@ func (db *SQLiteDatastore) AddAgent(agent *models.Agent) error {
 
 func (db *SQLiteDatastore) AddSession(session *pb.Workload) error {
 	models := strings.Join(session.Models, ",")
-	_, err := db.db.Exec("INSERT OR REPLACE INTO sessions (id, name, agent_id, models, payload) VALUES (?, ?, ?, ?, ?)", session.Id, session.Name, session.AgentId, models, session.Payload)
+	_, err := db.db.Exec("INSERT OR REPLACE INTO sessions (id, name, agent_id, models, payload, status) VALUES (?, ?, ?, ?, ?, ?)", session.Id, session.Name, session.AgentId, models, session.Payload, session.Status.String())
 	return err
 }
 
 func (db *SQLiteDatastore) GetSession(id string) (*pb.Workload, error) {
-	row := db.db.QueryRow("SELECT id, name, agent_id, models, payload, timestamp FROM sessions WHERE id = ?", id)
+	row := db.db.QueryRow("SELECT id, name, agent_id, models, payload, status, timestamp FROM sessions WHERE id = ?", id)
 
 	var session pb.Workload
 	var timestamp time.Time
 	var models string
-	err := row.Scan(&session.Id, &session.Name, &session.AgentId, &models, &session.Payload, &timestamp)
+	var status sql.NullString
+	err := row.Scan(&session.Id, &session.Name, &session.AgentId, &models, &session.Payload, &status, &timestamp)
 	if err != nil {
 		return nil, err
 	}
 	session.Timestamp = timestamp.Unix()
 	session.Models = strings.Split(models, ",")
+	if status.Valid {
+		st, ok := pb.WorkloadStatus_Status_value[status.String]
+		if ok {
+			session.Status = pb.WorkloadStatus_Status(st)
+		}
+	}
 
 	return &session, nil
 }
 
 func (db *SQLiteDatastore) ListSessions() ([]*pb.Workload, error) {
-	rows, err := db.db.Query("SELECT id, name, agent_id, models, payload, timestamp FROM sessions")
+	rows, err := db.db.Query("SELECT id, name, agent_id, models, payload, status, timestamp FROM sessions")
 	if err != nil {
 		return nil, err
 	}
@@ -115,11 +123,18 @@ func (db *SQLiteDatastore) ListSessions() ([]*pb.Workload, error) {
 		var session pb.Workload
 		var timestamp time.Time
 		var models string
-		if err := rows.Scan(&session.Id, &session.Name, &session.AgentId, &models, &session.Payload, &timestamp); err != nil {
+		var status sql.NullString
+		if err := rows.Scan(&session.Id, &session.Name, &session.AgentId, &models, &session.Payload, &status, &timestamp); err != nil {
 			return nil, err
 		}
 		session.Timestamp = timestamp.Unix()
 		session.Models = strings.Split(models, ",")
+		if status.Valid {
+			st, ok := pb.WorkloadStatus_Status_value[status.String]
+			if ok {
+				session.Status = pb.WorkloadStatus_Status(st)
+			}
+		}
 		sessions = append(sessions, &session)
 	}
 

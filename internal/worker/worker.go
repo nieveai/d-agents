@@ -148,6 +148,7 @@ func appendPayloadAndSave(workloadId string, responseText string) {
 
 	newPayload := fmt.Sprintf("%s\n\n---\n\n%s", string(session.Payload), responseText)
 	session.Payload = []byte(newPayload)
+	session.Status = pb.WorkloadStatus_COMPLETED
 
 	if err := db.AddSession(session); err != nil {
 		log.Printf("Error saving updated session %s to db: %s", workloadId, err)

@@ -85,6 +85,7 @@ type Workload struct {
 	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
 	Timestamp     int64                  `protobuf:"varint,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	AgentId       string                 `protobuf:"bytes,7,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	Status        WorkloadStatus_Status  `protobuf:"varint,8,opt,name=status,proto3,enum=proto.WorkloadStatus_Status" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -168,6 +169,13 @@ func (x *Workload) GetAgentId() string {
 	return ""
 }
 
+func (x *Workload) GetStatus() WorkloadStatus_Status {
+	if x != nil {
+		return x.Status
+	}
+	return WorkloadStatus_UNKNOWN
+}
+
 type WorkloadStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkloadId    string                 `protobuf:"bytes,1,opt,name=workload_id,json=workloadId,proto3" json:"workload_id,omitempty"`
@@ -232,7 +240,7 @@ var File_proto_d_agents_proto protoreflect.FileDescriptor
 
 const file_proto_d_agents_proto_rawDesc = "" +
 	"\n" +
-	"\x14proto/d-agents.proto\x12\x05proto\"\xbb\x01\n" +
+	"\x14proto/d-agents.proto\x12\x05proto\"\xf1\x01\n" +
 	"\bWorkload\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -240,7 +248,8 @@ const file_proto_d_agents_proto_rawDesc = "" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x18\n" +
 	"\apayload\x18\x05 \x01(\fR\apayload\x12\x1c\n" +
 	"\ttimestamp\x18\x06 \x01(\x03R\ttimestamp\x12\x19\n" +
-	"\bagent_id\x18\a \x01(\tR\aagentId\"\xcd\x01\n" +
+	"\bagent_id\x18\a \x01(\tR\aagentId\x124\n" +
+	"\x06status\x18\b \x01(\x0e2\x1c.proto.WorkloadStatus.StatusR\x06status\"\xcd\x01\n" +
 	"\x0eWorkloadStatus\x12\x1f\n" +
 	"\vworkload_id\x18\x01 \x01(\tR\n" +
 	"workloadId\x124\n" +
@@ -276,14 +285,15 @@ var file_proto_d_agents_proto_goTypes = []any{
 	(*WorkloadStatus)(nil),     // 2: proto.WorkloadStatus
 }
 var file_proto_d_agents_proto_depIdxs = []int32{
-	0, // 0: proto.WorkloadStatus.status:type_name -> proto.WorkloadStatus.Status
-	1, // 1: proto.Worker.ExecuteWorkload:input_type -> proto.Workload
-	2, // 2: proto.Worker.ExecuteWorkload:output_type -> proto.WorkloadStatus
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // 0: proto.Workload.status:type_name -> proto.WorkloadStatus.Status
+	0, // 1: proto.WorkloadStatus.status:type_name -> proto.WorkloadStatus.Status
+	1, // 2: proto.Worker.ExecuteWorkload:input_type -> proto.Workload
+	2, // 3: proto.Worker.ExecuteWorkload:output_type -> proto.WorkloadStatus
+	3, // [3:4] is the sub-list for method output_type
+	2, // [2:3] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_proto_d_agents_proto_init() }
