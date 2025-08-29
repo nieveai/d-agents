@@ -5,30 +5,28 @@ import (
 	"log"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/nieveai/d-agents/internal/mcp"
+	localmcp "github.com/nieveai/d-agents/internal/mcp"
 )
 
 func main() {
 	// Create a new MCP client.
-	client, err := mcp.NewClient()
-	if err != nil {
-		log.Fatalf("failed to create MCP client: %v", err)
-	}
+	client := localmcp.NewClient()
 
 	// Create a new stdio transport.
 	transport := &mcp.StdioTransport{}
 
 	// Connect to the server.
-	session, err := mcp.Connect(client, transport)
+	session, err := localmcp.Connect(client, transport)
 	if err != nil {
 		log.Fatalf("failed to connect to MCP server: %v", err)
 	}
 	defer session.Close()
 
 	// Get the server capabilities.
-	capabilities := mcp.GetServerCapabilities(session)
+	capabilities := localmcp.GetServerCapabilities(session)
 
 	// Print the capabilities.
 	fmt.Printf("Server capabilities: %+v\n", capabilities)
 }
+
 

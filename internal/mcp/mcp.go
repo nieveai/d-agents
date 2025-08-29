@@ -7,14 +7,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func NewClient() (*mcp.Client, error) {
+func NewClient() *mcp.Client {
 	// Create a new MCP client.
-	client, err := mcp.NewClient(&mcp.Implementation{Name: "mcp-client", Version: "v1.0.0"}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create MCP client: %w", err)
-	}
-
-	return client, nil
+	client := mcp.NewClient(&mcp.Implementation{Name: "mcp-client", Version: "v1.0.0"}, nil)
+	return client
 }
 
 func Connect(client *mcp.Client, transport mcp.Transport) (*mcp.ClientSession, error) {
@@ -27,7 +23,7 @@ func Connect(client *mcp.Client, transport mcp.Transport) (*mcp.ClientSession, e
 }
 
 func GetServerCapabilities(session *mcp.ClientSession) *mcp.ServerCapabilities {
-	return session.InitializeResult().ServerCapabilities
+	return session.InitializeResult().Capabilities
 }
 
 
