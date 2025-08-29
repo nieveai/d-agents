@@ -36,7 +36,8 @@ func NewSQLiteDatastore(path string) (*SQLiteDatastore, error) {
 		CREATE TABLE IF NOT EXISTS agents (
 			id TEXT PRIMARY KEY,
 			name TEXT,
-			description TEXT
+			description TEXT,
+			type TEXT
 		);
 	`)
 	if err != nil {
@@ -49,6 +50,7 @@ func NewSQLiteDatastore(path string) (*SQLiteDatastore, error) {
 			id TEXT PRIMARY KEY,
 			name TEXT,
 			agent_id TEXT,
+			agent_type TEXT,
 			models TEXT,
 			payload BLOB,
 			status TEXT,
@@ -78,24 +80,24 @@ func NewSQLiteDatastore(path string) (*SQLiteDatastore, error) {
 }
 
 func (db *SQLiteDatastore) AddAgent(agent *models.Agent) error {
-	_, err := db.db.Exec("INSERT INTO agents (id, name, description) VALUES (?, ?, ?)", agent.ID, agent.Name, agent.Description)
+	_, err := db.db.Exec("INSERT INTO agents (id, name, description, type) VALUES (?, ?, ?, ?)", agent.ID, agent.Name, agent.Description, agent.Type)
 	return err
 }
 
 func (db *SQLiteDatastore) AddSession(session *pb.Workload) error {
 	models := strings.Join(session.Models, ",")
-	_, err := db.db.Exec("INSERT OR REPLACE INTO sessions (id, name, agent_id, models, payload, status) VALUES (?, ?, ?, ?, ?, ?)", session.Id, session.Name, session.AgentId, models, session.Payload, session.Status.String())
+	_, err := db.db.Exec("INSERT OR REPLACE INTO sessions (id, name, agent_id, agent_type, models, payload, status) VALUES (?, ?, ?, ?, ?, ?, ?)", session.Id, session.Name, session.AgentId, session.AgentType, models, session.Payload, session.Status.String())
 	return err
 }
 
 func (db *SQLiteDatastore) GetSession(id string) (*pb.Workload, error) {
-	row := db.db.QueryRow("SELECT id, name, agent_id, models, payload, status, timestamp FROM sessions WHERE id = ?", id)
+	row := db.db.QueryRow("SELECT id, name, agent_id, agent_type, models, payload, status, timestamp FROM sessions WHERE id = ?", id)
 
 	var session pb.Workload
 	var timestamp time.Time
 	var models string
 	var status sql.NullString
-	err := row.Scan(&session.Id, &session.Name, &session.AgentId, &models, &session.Payload, &status, &timestamp)
+	err := row.Scan(&session.Id, &session.Name, &session.AgentId, &session.AgentType, &models, &session.Payload, &status, &timestamp)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +114,7 @@ func (db *SQLiteDatastore) GetSession(id string) (*pb.Workload, error) {
 }
 
 func (db *SQLiteDatastore) ListSessions() ([]*pb.Workload, error) {
-	rows, err := db.db.Query("SELECT id, name, agent_id, models, payload, status, timestamp FROM sessions")
+	rows, err := db.db.Query("SELECT id, name, agent_id, agent_type, models, payload, status, timestamp FROM sessions")
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +126,7 @@ func (db *SQLiteDatastore) ListSessions() ([]*pb.Workload, error) {
 		var timestamp time.Time
 		var models string
 		var status sql.NullString
-		if err := rows.Scan(&session.Id, &session.Name, &session.AgentId, &models, &session.Payload, &status, &timestamp); err != nil {
+		if err := rows.Scan(&session.Id, &session.Name, &session.AgentId, &session.AgentType, &models, &session.Payload, &status, &timestamp); err != nil {
 			return nil, err
 		}
 		session.Timestamp = timestamp.Unix()
@@ -178,7 +180,7 @@ func (db *SQLiteDatastore) ListModels() ([]*models.Model, error) {
 }
 
 func (s *SQLiteDatastore) ListAgents() ([]*models.Agent, error) {
-	rows, err := s.db.Query("SELECT id, name, description FROM agents")
+	rows, err := s.db.Query("SELECT id, name, description, type FROM agents")
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +189,7 @@ func (s *SQLiteDatastore) ListAgents() ([]*models.Agent, error) {
 	var agents []*models.Agent
 	for rows.Next() {
 		var agent models.Agent
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Description); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Description, &agent.Type); err != nil {
 			return nil, err
 		}
 		agents = append(agents, &agent)

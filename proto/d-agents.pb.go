@@ -86,6 +86,7 @@ type Workload struct {
 	Timestamp     int64                  `protobuf:"varint,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	AgentId       string                 `protobuf:"bytes,7,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	Status        WorkloadStatus_Status  `protobuf:"varint,8,opt,name=status,proto3,enum=proto.WorkloadStatus_Status" json:"status,omitempty"`
+	AgentType     string                 `protobuf:"bytes,9,opt,name=agent_type,json=agentType,proto3" json:"agent_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -176,6 +177,13 @@ func (x *Workload) GetStatus() WorkloadStatus_Status {
 	return WorkloadStatus_UNKNOWN
 }
 
+func (x *Workload) GetAgentType() string {
+	if x != nil {
+		return x.AgentType
+	}
+	return ""
+}
+
 type WorkloadStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkloadId    string                 `protobuf:"bytes,1,opt,name=workload_id,json=workloadId,proto3" json:"workload_id,omitempty"`
@@ -240,7 +248,7 @@ var File_proto_d_agents_proto protoreflect.FileDescriptor
 
 const file_proto_d_agents_proto_rawDesc = "" +
 	"\n" +
-	"\x14proto/d-agents.proto\x12\x05proto\"\xf1\x01\n" +
+	"\x14proto/d-agents.proto\x12\x05proto\"\x90\x02\n" +
 	"\bWorkload\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -249,7 +257,9 @@ const file_proto_d_agents_proto_rawDesc = "" +
 	"\apayload\x18\x05 \x01(\fR\apayload\x12\x1c\n" +
 	"\ttimestamp\x18\x06 \x01(\x03R\ttimestamp\x12\x19\n" +
 	"\bagent_id\x18\a \x01(\tR\aagentId\x124\n" +
-	"\x06status\x18\b \x01(\x0e2\x1c.proto.WorkloadStatus.StatusR\x06status\"\xcd\x01\n" +
+	"\x06status\x18\b \x01(\x0e2\x1c.proto.WorkloadStatus.StatusR\x06status\x12\x1d\n" +
+	"\n" +
+	"agent_type\x18\t \x01(\tR\tagentType\"\xcd\x01\n" +
 	"\x0eWorkloadStatus\x12\x1f\n" +
 	"\vworkload_id\x18\x01 \x01(\tR\n" +
 	"workloadId\x124\n" +

@@ -1,5 +1,6 @@
 {
   "id": "agent-1",
   "name": "My First Agent",
-  "description": "the agent for testing"
+  "description": "the agent for testing",
+  "type": "ChatAgent"
 }

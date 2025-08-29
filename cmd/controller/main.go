@@ -137,6 +137,7 @@ func main() {
 							Models:      modelIDs,
 							Description: agent.Description,
 							AgentId:     agent.ID,
+							AgentType:   agent.Type,
 							Timestamp:   time.Now().Unix(),
 							Status:      pb.WorkloadStatus_PENDING,
 						}
@@ -182,7 +183,6 @@ func main() {
 					if currentSession != nil {
 						inPayloadInputMode = false
 						payload := payloadBuffer.String()
-						payloadBuffer.Reset()
 
 						currentSession.Payload = []byte(payload)
 						db.AddSession(currentSession)
@@ -229,8 +229,9 @@ func main() {
 						fmt.Println("No agents registered.")
 						return
 					}
+
 					for _, agent := range agents {
-						fmt.Printf("  - %s: %s\n    Description: %s\n", agent.ID, agent.Name, agent.Description)
+						fmt.Printf("  - %s: %s (%s)\n    Description: %s\n", agent.ID, agent.Name, agent.Type, agent.Description)
 					}
 
 				case "session":
