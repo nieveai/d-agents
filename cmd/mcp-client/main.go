@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"d-agents/internal/mcp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nieveai/d-agents/internal/mcp"
 )
 
 func main() {
