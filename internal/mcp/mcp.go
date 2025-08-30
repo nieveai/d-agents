@@ -25,5 +25,3 @@ func Connect(client *mcp.Client, transport mcp.Transport) (*mcp.ClientSession, e
 func GetServerCapabilities(session *mcp.ClientSession) *mcp.ServerCapabilities {
 	return session.InitializeResult().Capabilities
 }
-
-

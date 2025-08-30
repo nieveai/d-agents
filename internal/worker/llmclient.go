@@ -10,8 +10,8 @@ import (
 	m "github.com/nieveai/d-agents/internal/models"
 	pb "github.com/nieveai/d-agents/proto"
 	"github.com/openai/openai-go/v2"
-	"google.golang.org/api/option"
 	openai_option "github.com/openai/openai-go/v2/option"
+	"google.golang.org/api/option"
 )
 
 type LLMClient struct {

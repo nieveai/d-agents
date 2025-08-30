@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -11,10 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/charmbracelet/glamour"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	
 	"github.com/google/uuid"
+	"github.com/atotto/clipboard"
 	"github.com/nieveai/d-agents/internal/database"
 	"github.com/nieveai/d-agents/internal/models"
 	"github.com/nieveai/d-agents/internal/worker"
+	"golang.org/x/text/encoding/unicode"
 	pb "github.com/nieveai/d-agents/proto"
 )
 
@@ -22,16 +29,151 @@ type Config struct {
 	Workers int `json:"workers"`
 }
 
-var agents = make(map[string]*models.Agent)
+
 var modelStore = make(map[string]*models.Model)
 var sessions = make(map[string]*pb.Workload)
 var currentSession *pb.Workload
 var inPayloadInputMode = false
 var payloadBuffer strings.Builder
 
-type Command func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string)
+type Command func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg
 
 var commands map[string]Command
+
+type model struct {
+	viewport     viewport.Model
+	messages     []string
+	textarea     textarea.Model
+	senderStyle  lipgloss.Style
+	err          error
+	db           *database.SQLiteDatastore
+	workloadChan chan<- *pb.Workload
+}
+
+type responseMsg string
+
+func initialModel(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload) *model {
+	ta := textarea.New()
+	ta.Placeholder = "Type a command ..."
+	ta.Focus()
+
+	ta.Prompt = "> "
+	ta.CharLimit = 280
+
+	ta.SetWidth(100)
+	ta.SetHeight(1)
+
+	// Remove cursor line styling
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+
+	ta.ShowLineNumbers = false
+
+	vp := viewport.New(100, 20)
+	vp.SetContent(`Welcome to the d-agents controller!
+Type a command to get started. (e.g. /help)`)
+
+	ta.KeyMap.InsertNewline.SetEnabled(false)
+
+	return &model{
+		textarea:     ta,
+		messages:     []string{},
+		viewport:     vp,
+		senderStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
+		err:          nil,
+		db:           db,
+		workloadChan: workloadChan,
+	}
+}
+
+func (m *model) Init() tea.Cmd {
+	return textarea.Blink
+}
+
+func (m *model) renderMessages() {
+	var renderedMessages []string
+	style, _ := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(100),
+	)
+	for _, msg := range m.messages {
+		if strings.HasPrefix(msg, m.senderStyle.Render("You: ")) {
+			renderedMessages = append(renderedMessages, msg)
+		} else {
+			r, _ := style.Render(msg)
+			renderedMessages = append(renderedMessages, r)
+		}
+	}
+	m.viewport.SetContent(strings.Join(renderedMessages, "\n"))
+}
+
+func (m *model) processCommand() {
+	input := m.textarea.Value()
+	if strings.HasPrefix(input, "/") {
+		parts := strings.Fields(input)
+		if cmd, ok := commands[parts[0]]; ok {
+			rsm := cmd(m.db, m.workloadChan, parts[1:])
+			m.messages = append(m.messages, string(rsm))
+			m.renderMessages()
+		} else {
+			m.messages = append(m.messages, "Unknown command. Type /help for a list of commands.")
+			m.renderMessages()
+		}
+	} else {
+		if inPayloadInputMode {
+			payloadBuffer.WriteString(input)
+			payloadBuffer.WriteString("\n")
+		} else {
+			m.messages = append(m.messages, "Invalid command. Please use the format 'type payload' or start a session.")
+			m.renderMessages()
+		}
+	}
+}
+
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var (
+		tiCmd tea.Cmd
+		vpCmd tea.Cmd
+	)
+
+	m.textarea, tiCmd = m.textarea.Update(msg)
+	m.viewport, vpCmd = m.viewport.Update(msg)
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			clipboard.WriteAll(m.viewport.View())
+		case tea.KeyEsc:
+			fmt.Println(m.textarea.Value())
+			return m, tea.Quit
+		case tea.KeyEnter:
+			m.messages = append(m.messages, m.senderStyle.Render("You: ")+m.textarea.Value())
+			m.renderMessages()
+			m.processCommand() // Call the command processing logic
+			m.textarea.Reset()
+			m.viewport.GotoBottom()
+		}
+
+	// We handle errors just like any other message
+	case error:
+		m.err = msg
+		return m, nil
+	}
+
+		return m, tea.Batch(tiCmd, vpCmd)
+}
+
+func (m *model) View() string {
+	e := unicode.UTF8.NewEncoder()
+	s, _ := e.String(fmt.Sprintf(
+		"%s\n\n%s",
+		m.viewport.View(),
+		m.textarea.View(),
+	))
+	return s
+}
+
+var p *tea.Program
 
 func main() {
 	// Command-line flags
@@ -64,14 +206,7 @@ func main() {
 		log.Fatalf("Error opening database: %s", err)
 	}
 
-	// Load agents from database
-	dbAgents, err := db.ListAgents()
-	if err != nil {
-		log.Printf("Error loading agents from database: %s", err)
-	}
-	for _, agent := range dbAgents {
-		agents[agent.ID] = agent
-	}
+	
 
 	// Load sessions from database
 	dbSessions, err := db.ListSessions()
@@ -92,41 +227,47 @@ func main() {
 	}
 
 	commands = map[string]Command{
-		"/help": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
-			fmt.Println("Available commands:")
-			fmt.Println("  /help - Show this help message")
-			fmt.Println("  /list agent - List all registered agents")
-			fmt.Println("  /list session - List all created sessions")
-			fmt.Println("  /list model - List all registered models")
-			fmt.Println("  /add agent @<filename> - Add an agent from a configuration file")
-			fmt.Println("  /add model @<filename> - Add a model from a configuration file")
-			fmt.Println("  /session start <agent-id> <model-id1,model-id2,...> - Create a new agent workload")
-			fmt.Println("  /session run [session-id] - Run the current session or a specific session by ID")
-			fmt.Println("  /session save - Save the current session")
-			fmt.Println("  /session load <workload-id> - Load a session by ID")
-			fmt.Println("  /quit - Exit the program")
+		"/help": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
+			helpText := `Available commands: 🇨🇳
+ - /help - Show this help message
+ - /list agent - List all registered agents
+ - /list session - List all created sessions
+ - /list model - List all registered models
+ - /add agent @<filename> - Add an agent from a configuration file
+ - /add model @<filename> - Add a model from a configuration file
+ - /session start <agent-id> <model-id1,model-id2,...> - Create a new agent workload
+ - /session run [session-id] - Run the current session or a specific session by ID
+ - /session save - Save the current session
+ - /session load <workload-id> - Load a session by ID
+ - /quit - Exit the program`
+			return responseMsg(helpText)
 		},
-		"/quit": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
+		"/quit": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
 			os.Exit(0)
+			return "nil"
 		},
-		"/session": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
+		"/session": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
+			var response responseMsg
 			if len(args) > 0 {
 				switch args[0] {
 				case "start":
 					if len(args) > 2 {
 						agentID := args[1]
 						modelIDsRaw := args[2]
-						agent, ok := agents[agentID]
-						if !ok {
-							fmt.Printf("Agent with ID '%s' not found.\n", agentID)
-							return
+						agent, err := db.GetAgent(agentID)
+						if err != nil {
+							response = (responseMsg(fmt.Sprintf("Error getting agent with ID '%s': %s", agentID, err)))
+							return response
+						}
+						if agent == nil {
+							response = (responseMsg(fmt.Sprintf("Agent with ID '%s' not found.", agentID)))
+							return response
 						}
 
 						modelIDs := strings.Split(modelIDsRaw, ",")
 						for _, modelID := range modelIDs {
 							if _, ok := modelStore[modelID]; !ok {
-								fmt.Printf("Model with ID '%s' not found.\n", modelID)
-								return
+								return(responseMsg(fmt.Sprintf("Model with ID '%s' not found.", modelID)))
 							}
 						}
 
@@ -146,38 +287,40 @@ func main() {
 						currentSession = workload
 						inPayloadInputMode = true
 						payloadBuffer.Reset()
-						fmt.Println("what would you like the agent to do? Please enter your instruction below.")
+						response=(responseMsg("what would you like the agent to do? Please enter your instruction below."))
 					} else {
-						fmt.Println("Usage: /session start <agent-id> <model-id1,model-id2,...>")
+						response=(responseMsg("Usage: /session start <agent-id> <model-id1,model-id2,...>"))
 					}
 
 				case "run":
 					if len(args) > 1 {
 						sessionID := args[1]
 						session, ok := sessions[sessionID]
-                        if !ok {
-                            fmt.Printf("Session with ID '%s' not found.\n", sessionID)
-                            return
-                        }
-                        session.Status = pb.WorkloadStatus_RUNNING
-                        db.AddSession(session)
-                        workloadChan <- session
-                        fmt.Printf("Running session with workload ID %s\n", session.Id)
+						if !ok {
+							response=(responseMsg(fmt.Sprintf("Session with ID '%s' not found.", sessionID)))
+							return response
+						}
+						session.Status = pb.WorkloadStatus_RUNNING
+						db.AddSession(session)
+						workloadChan <- session
+						response=(responseMsg(fmt.Sprintf("Running session with workload ID %s", session.Id)))
 					} else {
 						if currentSession != nil {
-                            inPayloadInputMode = false
-                            payload := payloadBuffer.String()
-                            payloadBuffer.Reset()
+							inPayloadInputMode = false
+							payload := payloadBuffer.String()
+							payloadBuffer.Reset()
 
-                            currentSession.Payload = []byte(payload)
-                            currentSession.Status = pb.WorkloadStatus_RUNNING
-                            db.AddSession(currentSession)
-                            workloadChan <- currentSession
-                            fmt.Printf("Running session with workload ID %s\n", currentSession.Id)
+							currentSession.Payload = []byte(payload)
+							currentSession.Status = pb.WorkloadStatus_RUNNING
+							db.AddSession(currentSession)
+							workloadChan <- currentSession
+							response=(responseMsg(fmt.Sprintf("Running session with workload ID %s", currentSession.Id)))
 						} else {
-							fmt.Println("No active session. Use '/session start <agent-id>' to start one.")
+							response=(responseMsg("No active session. Use '/session start <agent-id>' to start one."))
 						}
+						
 					}
+					
 
 				case "save":
 					if currentSession != nil {
@@ -187,96 +330,106 @@ func main() {
 						currentSession.Payload = []byte(payload)
 						db.AddSession(currentSession)
 						sessions[currentSession.Id] = currentSession
-						fmt.Printf("Saved session with workload ID %s\n", currentSession.Id)
+						response=(responseMsg(fmt.Sprintf("Saved session with workload ID %s", currentSession.Id)))
 					} else {
-						fmt.Println("No active session. Use '/session start <agent-id>' to start one.")
+						response=(responseMsg("No active session. Use '/session start <agent-id>' to start one."))
 					}
 				case "load":
 					if len(args) > 1 {
 						sessionID := args[1]
 						session, err := db.GetSession(sessionID)
 						if err != nil {
-							fmt.Printf("Error loading session: %s\n", err)
-							return
+							response=(responseMsg(fmt.Sprintf("Error loading session: %s", err)))
+							return response
 						}
 						if session == nil {
-							fmt.Printf("Session with ID '%s' not found.\n", sessionID)
-							return
+							response=(responseMsg(fmt.Sprintf("Session with ID '%s' not found.", sessionID)))
+							return response
 						}
 						currentSession = session
-                        sessions[session.Id] = session
-                        payloadBuffer.Reset()
-                        payloadBuffer.Write(session.Payload)
+						sessions[session.Id] = session
+						payloadBuffer.Reset()
+						payloadBuffer.Write(session.Payload)
 						inPayloadInputMode = true
-                        fmt.Printf("Loaded session with ID: %s\n", session.Id)
-                        fmt.Println("Payload:")
-                        fmt.Println(string(session.Payload))
+						response=(responseMsg(fmt.Sprintf("Loaded session with ID: %s\nPayload:\n%s", session.Id, string(session.Payload))))
 					} else {
-						fmt.Println("Usage: /session load <workload-id>")
+						response=(responseMsg("Usage: /session load <workload-id>"))
 					}
 				default:
-					fmt.Println("Unknown command for /session. Available commands: start, run, save, load")
+					response=(responseMsg("Unknown command for /session. Available commands: start, run, save, load"))
 				}
 			} else {
-				fmt.Println("Usage: /session <start|run|save|load>")
+				response=(responseMsg("Usage: /session <start|run|save|load>"))
 			}
+			return response
 		},
-		"/list": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
+		"/list": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
+			var response responseMsg
 			if len(args) > 0 {
 				switch args[0] {
 				case "agent":
-					if len(agents) == 0 {
-						fmt.Println("No agents registered.")
-						return
+					dbAgents, err := db.ListAgents()
+					if err != nil {
+						response=(responseMsg(fmt.Sprintf("Error loading agents from database: %s", err)))
+						return response
 					}
-
-					for _, agent := range agents {
-						fmt.Printf("  - %s: %s (%s)\n    Description: %s\n", agent.ID, agent.Name, agent.Type, agent.Description)
+					if len(dbAgents) == 0 {
+						response=(responseMsg("No agents registered."))
+						return response
 					}
+					var builder strings.Builder
+					for _, agent := range dbAgents {
+						builder.WriteString(fmt.Sprintf("  - %s: %s (%s)\n    Description: %s\n", agent.ID, agent.Name, agent.Type, agent.Description))
+					}
+					response=(responseMsg(builder.String()))
 
 				case "session":
 					dbSessions, err := db.ListSessions()
 					if err != nil {
-						fmt.Printf("Error loading sessions from database: %s\n", err)
-						return
+						response=(responseMsg(fmt.Sprintf("Error loading sessions from database: %s", err)))
+						return response
 					}
 					if len(dbSessions) == 0 {
-						fmt.Println("No sessions created.")
-						return
+						response=(responseMsg("No sessions created."))
+						return response
 					}
-
+					var builder strings.Builder
 					for _, session := range dbSessions {
 						payload := string(session.Payload)
 						if len(payload) > 50 {
 							payload = payload[:50] + "..."
 						}
-						fmt.Printf("  - %s: %s (%s)\n    Payload: %s\n", session.Id, session.Name, session.Status, payload)
+						builder.WriteString(fmt.Sprintf("  - %s: %s (%s)\n    Payload: %s\n", session.Id, session.Name, session.Status, payload))
 					}
-
+					response=(responseMsg(builder.String()))
 
 				case "model":
 					if len(modelStore) == 0 {
-						fmt.Println("No models registered.")
-						return
+						response=(responseMsg("No models registered."))
+						return response
 					}
+					var builder strings.Builder
 					for _, model := range modelStore {
-						fmt.Printf("  - %s: %s/%s\n", model.ID, model.Provider, model.ModelID)
+						builder.WriteString(fmt.Sprintf("  - %s: %s/%s\n", model.ID, model.Provider, model.ModelID))
 						if model.APIURL != "" {
-							fmt.Printf("    API URL: %s\n", model.APIURL)
+							builder.WriteString(fmt.Sprintf("    API URL: %s\n", model.APIURL))
 						}
 						if model.APISpec != "" {
-							fmt.Printf("    API Spec: %s\n", model.APISpec)
+							builder.WriteString(fmt.Sprintf("    API Spec: %s\n", model.APISpec))
 						}
 					}
+					response=(responseMsg(builder.String()))
 
 				default:
-					fmt.Println("Unknown subcommand for /list. Try '/list agent', '/list session', or '/list model'")
+					response=(responseMsg("Unknown subcommand for /list. Try '/list agent', '/list session', or '/list model'"))
 				}
 			} else {
-				fmt.Println("Usage: /list <agent|session|model>")
+				response=(responseMsg("Usage: /list <agent|session|model>"))
 			}
+			return response
 		},
-		"/add": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) {
+		"/add": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
+			var response responseMsg
 			if len(args) > 0 {
 				switch args[0] {
 				case "agent":
@@ -284,61 +437,62 @@ func main() {
 						filename := strings.TrimPrefix(args[1], "@")
 						file, err := os.Open(filename)
 						if err != nil {
-							fmt.Printf("Error opening file: %s\n", err)
-							return
+							response=(responseMsg(fmt.Sprintf("Error opening file: %s", err)))
+							return response
 						}
 						defer file.Close()
 
 						var agent models.Agent
 						decoder := json.NewDecoder(file)
 						if err := decoder.Decode(&agent); err != nil {
-							fmt.Printf("Error decoding agent file: %s\n", err)
-							return
+							response=(responseMsg(fmt.Sprintf("Error decoding agent file: %s", err)))
+							return response
 						}
 
 						if err := db.AddAgent(&agent); err != nil {
-							fmt.Printf("Error adding agent to database: %s\n", err)
-							return
+							response=(responseMsg(fmt.Sprintf("Error adding agent to database: %s", err)))
+							return response
 						}
 
-						agents[agent.ID] = &agent
-						fmt.Printf("Agent '%s' with ID '%s' added.\n", agent.Name, agent.ID)
+						
+						response=(responseMsg(fmt.Sprintf("Agent '%s' with ID '%s' added.", agent.Name, agent.ID)))
 					} else {
-						fmt.Println("Usage: /add agent @<filename>")
+						response=(responseMsg("Usage: /add agent @<filename>"))
 					}
 				case "model":
 					if len(args) > 1 && strings.HasPrefix(args[1], "@") {
 						filename := strings.TrimPrefix(args[1], "@")
 						file, err := os.Open(filename)
 						if err != nil {
-							fmt.Printf("Error opening file: %s\n", err)
-							return
+							response=(responseMsg(fmt.Sprintf("Error opening file: %s", err)))
+							return response
 						}
 						defer file.Close()
 
 						var model models.Model
 						decoder := json.NewDecoder(file)
 						if err := decoder.Decode(&model); err != nil {
-							fmt.Printf("Error decoding model file: %s\n", err)
-							return
+							response=(responseMsg(fmt.Sprintf("Error decoding model file: %s", err)))
+							return response
 						}
 
 						if err := db.AddModel(&model); err != nil {
-							fmt.Printf("Error adding model to database: %s\n", err)
-							return
+							response=(responseMsg(fmt.Sprintf("Error adding model to database: %s", err)))
+							return response
 						}
 
 						modelStore[model.ID] = &model
-						fmt.Printf("Model '%s' with ID '%s' added.\n", model.ModelID, model.ID)
+						response=(responseMsg(fmt.Sprintf("Model '%s' with ID '%s' added.", model.ModelID, model.ID)))
 					} else {
-						fmt.Println("Usage: /add model @<filename>")
+						response=(responseMsg("Usage: /add model @<filename>"))
 					}
 				default:
-					fmt.Println("Unknown subcommand for /add. Try '/add agent' or '/add model'")
+					response=(responseMsg("Unknown subcommand for /add. Try '/add agent' or '/add model'"))
 				}
 			} else {
-				fmt.Println("Usage: /add <agent|model> @<filename>")
+				response=(responseMsg("Usage: /add <agent|model> @<filename>"))
 			}
+			return response
 		},
 	}
 
@@ -353,41 +507,10 @@ func main() {
 		go runWorker(i, workloadChan)
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Enter workload command (e.g., 'echo hello world') or /help for commands:")
+	p = tea.NewProgram(initialModel(db, workloadChan))
 
-	for {
-		fmt.Print("> ")
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
-
-		if strings.HasPrefix(input, "/") {
-			parts := strings.Fields(input)
-			if cmd, ok := commands[parts[0]]; ok {
-				cmd(db, workloadChan, parts[1:])
-			} else {
-				fmt.Println("Unknown command. Type /help for a list of commands.")
-			}
-			continue
-		}
-
-		if inPayloadInputMode {
-			payloadBuffer.WriteString(input)
-			payloadBuffer.WriteString("\n")
-			continue
-		}
-
-		parts := strings.SplitN(input, " ", 2)
-
-		if len(parts) < 2 {
-			if parts[0] == "exit" {
-				close(workloadChan)
-				return
-			}
-			fmt.Println("Invalid command. Please use the format 'type payload'")
-			continue
-		}
-
+	if _, err := p.Run(); err != nil {
+		log.Fatal(err)
 	}
 }
 

@@ -28,5 +28,3 @@ func main() {
 	// Print the capabilities.
 	fmt.Printf("Server capabilities: %+v\n", capabilities)
 }
-
-
