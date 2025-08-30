@@ -228,7 +228,7 @@ func main() {
 
 	commands = map[string]Command{
 		"/help": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
-			helpText := `Available commands:
+			helpText := `Available commands: 🇨🇳
  - /help - Show this help message
  - /list agent - List all registered agents
  - /list session - List all created sessions
