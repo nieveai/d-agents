@@ -12,6 +12,7 @@ import (
 
 type Datastore interface {
 	AddAgent(agent *models.Agent) error
+	GetAgent(id string) (*models.Agent, error)
 	ListAgents() ([]*models.Agent, error)
 	AddSession(session *pb.Workload) error
 	GetSession(id string) (*pb.Workload, error)
@@ -77,6 +78,18 @@ func NewSQLiteDatastore(path string) (*SQLiteDatastore, error) {
 	}
 
 	return &SQLiteDatastore{db: db}, nil
+}
+
+func (db *SQLiteDatastore) GetAgent(id string) (*models.Agent, error) {
+	row := db.db.QueryRow("SELECT id, name, description, type FROM agents WHERE id = ?", id)
+
+	var agent models.Agent
+	err := row.Scan(&agent.ID, &agent.Name, &agent.Description, &agent.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	return &agent, nil
 }
 
 func (db *SQLiteDatastore) AddAgent(agent *models.Agent) error {
