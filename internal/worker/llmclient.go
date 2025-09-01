@@ -28,7 +28,7 @@ func NewLLMClient(ctx context.Context, models []*m.Model) (*LLMClient, error) {
 	for _, model := range models {
 		llm.modelInfo[model.ID] = model
 
-		if _, ok := llm.clients[model.Provider]; ok {
+		if _, ok := llm.clients[model.ID]; ok {
 			continue
 		}
 
@@ -56,13 +56,13 @@ func NewLLMClient(ctx context.Context, models []*m.Model) (*LLMClient, error) {
 		}
 
 		if err != nil {
-			log.Printf("Error initializing client for provider %s: %v", model.Provider, err)
+			log.Printf("Error initializing client for provider %s: %v", model.ID, err)
 			continue
 		}
 
 		if client != nil {
-			llm.clients[model.Provider] = client
-			log.Printf("Initialized client for provider: %s", model.Provider)
+			llm.clients[model.ID] = client
+			log.Printf("Initialized client for provider: %s", model.ID)
 		}
 	}
 	return llm, nil
@@ -81,9 +81,9 @@ func (llm *LLMClient) GenerateContent(workload *pb.Workload, input string) (stri
 		return "", fmt.Errorf("model information not found for model ID '%s'", modelID)
 	}
 
-	client, ok := llm.clients[model.Provider]
+	client, ok := llm.clients[model.ID]
 	if !ok {
-		return "", fmt.Errorf("client not found for provider '%s'", model.Provider)
+		return "", fmt.Errorf("llm client not found for model '%s'", model.ID)
 	}
 
 	var responseText string
@@ -126,7 +126,7 @@ func (llm *LLMClient) GenerateContent(workload *pb.Workload, input string) (stri
 			responseText = resp.Choices[0].Message.Content
 		}
 	default:
-		err = fmt.Errorf("unknown client type for provider '%s'", model.Provider)
+		err = fmt.Errorf("unknown client type for model '%s'", model.ID)
 	}
 
 	if err != nil {
