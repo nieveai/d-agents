@@ -393,6 +393,7 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 		}, window)
 
 		d.Show()
+		window.Canvas().Focus(sessionNameEntry)
 	})
 
 	refreshButton := widget.NewButton("Refresh", func() {

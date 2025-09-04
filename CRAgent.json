@@ -1,0 +1,6 @@
+{
+  "id": "cr-agent",
+  "name": "Company Relationship Agent",
+  "description": "the agent for managing company's relationships",
+  "type": "CompanyRelationshipAgent"
+}

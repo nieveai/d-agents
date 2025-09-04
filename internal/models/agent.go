@@ -15,6 +15,7 @@ type Agent struct {
 // genAIClient interface for generative AI clients
 type GenAIClient interface {
 	GenerateContent(workload *pb.Workload, input string) (string, error)
+	GenerateContentWithSystemPrompt(workload *pb.Workload, input string, system_prompt string) (string, error)
 }
 
 // Agent interface for agents to implement
