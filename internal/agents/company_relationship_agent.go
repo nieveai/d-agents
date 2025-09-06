@@ -3,7 +3,6 @@ package agents
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
@@ -75,11 +74,7 @@ func (a *CompanyRelationshipAgent) DoWork(workload *pb.Workload, genAIClient m.G
 }
 
 
-// extractJSONArray finds and extracts the first JSON array from a string.
-func extractJSONArray(s string) string {
-	re := regexp.MustCompile(`(?s)[\[].*[\]]`) // Corrected regex to properly match JSON arrays
-	return re.FindString(s)
-}
+
 
 // sanitizeRelationshipType prepares a string to be used as a Neo4j relationship type.
 func sanitizeRelationshipType(s string) string {

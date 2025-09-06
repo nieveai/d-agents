@@ -25,7 +25,8 @@ func NewShoppingDB() (*ShoppingDB, error) {
 			name TEXT,
 			price REAL,
 			date TEXT,
-			source TEXT
+			source TEXT,
+			url TEXT
 		)
 	`)
 	if err != nil {
@@ -35,10 +36,10 @@ func NewShoppingDB() (*ShoppingDB, error) {
 	return &ShoppingDB{db}, nil
 }
 
-func (db *ShoppingDB) InsertProduct(name string, price float64, date time.Time, source string) error {
+func (db *ShoppingDB) InsertProduct(name string, price float64, date time.Time, source string, url string) error {
 	_, err := db.Exec(
-		"INSERT INTO products (name, price, date, source) VALUES (?, ?, ?, ?)",
-		name, price, date.Format(time.RFC3339), source,
+		"INSERT INTO products (name, price, date, source, url) VALUES (?, ?, ?, ?, ?)",
+		name, price, date.Format(time.RFC3339), source, url,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert product: %w", err)

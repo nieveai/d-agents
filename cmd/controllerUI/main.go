@@ -405,7 +405,7 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 
 func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, refreshChan chan bool, tabs *container.AppTabs, tab *container.TabItem) fyne.CanvasObject {
 	label := widget.NewLabel(fmt.Sprintf("Session: %s", session.Name))
-	statusLabel := widget.NewLabel(fmt.Sprintf("Status: %s", session.Status.String()))
+	statusLabel := widget.NewLabel(fmt.Sprintf("Status: %s Agent: %s Models: %s", session.Status.String(), session.AgentId, session.Models))
 	done := make(chan struct{})
 
 	closeButton := widget.NewButton("X", func() {
@@ -467,7 +467,7 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 
 					if newSession.Status != pb.WorkloadStatus_RUNNING {
 						session.Status = newSession.Status
-						statusLabel.SetText(fmt.Sprintf("Status: %s", session.Status.String()))
+						statusLabel.SetText(fmt.Sprintf("Status: %s Agent: %s Models: %s", session.Status.String(), session.AgentId, session.Models))
 
 						if newSession.Status == pb.WorkloadStatus_COMPLETED {
 							log.Printf("Session %s completed. Reloading payload.", session.Id)
@@ -500,7 +500,7 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 		session.Status = pb.WorkloadStatus_RUNNING
 		db.AddSession(session)
 		richText.ParseMarkdown(string(session.Payload))
-		statusLabel.SetText(fmt.Sprintf("Status: %s", session.Status.String()))
+		statusLabel.SetText(fmt.Sprintf("Status: %s Agent: %s Models: %s", session.Status.String(), session.AgentId, session.Models))
 		workloadChan <- session
 		showViewMode()
 		refreshChan <- true
