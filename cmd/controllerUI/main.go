@@ -30,6 +30,7 @@ type Config struct {
 var modelStore = make(map[string]*amodels.Model)
 var sessions = make(map[string]*pb.Workload)
 var openSessionTabs = make(map[string]*container.TabItem)
+var scheduledSessions = make(map[string]*time.Ticker)
 var currentSession *pb.Workload
 
 func main() {
@@ -296,7 +297,7 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 				tabs.Select(tab)
 			} else {
 				tab := container.NewTabItem(session.Name, nil)
-				tab.Content = makeSessionTab(session, db, workloadChan, refreshChan, tabs, tab)
+				tab.Content = makeSessionTab(session, db, workloadChan, refreshChan, tabs, tab, window)
 				openSessionTabs[session.Id] = tab
 				tabs.Append(tab)
 				tabs.Select(tab)
@@ -386,7 +387,7 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 				Status:    pb.WorkloadStatus_PENDING,
 			}
 			tab := container.NewTabItem(newSession.Name, nil)
-			tab.Content = makeSessionTab(newSession, db, workloadChan, refreshChan, tabs, tab)
+			tab.Content = makeSessionTab(newSession, db, workloadChan, refreshChan, tabs, tab, window)
 			openSessionTabs[newSession.Id] = tab
 			tabs.Append(tab)
 			tabs.Select(tab)
@@ -403,12 +404,16 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 	return container.NewBorder(nil, container.NewHBox(createButton, refreshButton), nil, nil, table)
 }
 
-func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, refreshChan chan bool, tabs *container.AppTabs, tab *container.TabItem) fyne.CanvasObject {
+func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, refreshChan chan bool, tabs *container.AppTabs, tab *container.TabItem, window fyne.Window) fyne.CanvasObject {
 	label := widget.NewLabel(fmt.Sprintf("Session: %s", session.Name))
 	statusLabel := widget.NewLabel(fmt.Sprintf("Status: %s Agent: %s Models: %s", session.Status.String(), session.AgentId, session.Models))
 	done := make(chan struct{})
 
 	closeButton := widget.NewButton("X", func() {
+		if ticker, ok := scheduledSessions[session.Id]; ok {
+			ticker.Stop()
+			delete(scheduledSessions, session.Id)
+		}
 		close(done)
 		tabs.Remove(tab)
 		delete(openSessionTabs, session.Id)
@@ -426,7 +431,18 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 	payloadEntry.MultiLine = true
 	editScroll := container.NewScroll(payloadEntry)
 
-	var editButton, saveButton, runButton *widget.Button
+	var editButton, saveButton, runButton, stopButton *widget.Button
+
+	runSession := func() {
+		text, _ := payloadBinding.Get()
+		session.Payload = []byte(text)
+		session.Status = pb.WorkloadStatus_RUNNING
+		db.AddSession(session)
+		richText.ParseMarkdown(string(session.Payload))
+		statusLabel.SetText(fmt.Sprintf("Status: %s Agent: %s Models: %s", session.Status.String(), session.AgentId, session.Models))
+		workloadChan <- session
+		refreshChan <- true
+	}
 
 	// Toggling logic
 	showViewMode := func() {
@@ -434,7 +450,14 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 		editScroll.Hide()
 		editButton.Show()
 		saveButton.Hide()
-		runButton.Hide()
+		runButton.Show()
+		if _, ok := scheduledSessions[session.Id]; ok {
+			stopButton.Show()
+			runButton.Hide()
+		} else {
+			stopButton.Hide()
+			runButton.Show()
+		}
 	}
 
 	showEditMode := func() {
@@ -443,6 +466,7 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 		editButton.Hide()
 		saveButton.Show()
 		runButton.Show()
+		stopButton.Hide()
 	}
 
 	var startPolling func()
@@ -495,19 +519,81 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 		refreshChan <- true
 	})
 	runButton = widget.NewButton("Run", func() {
-		text, _ := payloadBinding.Get()
-		session.Payload = []byte(text)
-		session.Status = pb.WorkloadStatus_RUNNING
-		db.AddSession(session)
-		richText.ParseMarkdown(string(session.Payload))
-		statusLabel.SetText(fmt.Sprintf("Status: %s Agent: %s Models: %s", session.Status.String(), session.AgentId, session.Models))
-		workloadChan <- session
-		showViewMode()
-		refreshChan <- true
-		startPolling()
+		intervalEntry := widget.NewEntry()
+		intervalEntry.SetPlaceHolder("e.g., 1, 2.5")
+		intervalEntry.Disable()
+
+		scheduleCheck := widget.NewCheck("Schedule periodic runs", func(checked bool) {
+			if checked {
+				intervalEntry.Enable()
+			} else {
+				intervalEntry.Disable()
+			}
+		})
+
+		formItems := []*widget.FormItem{
+			widget.NewFormItem("", scheduleCheck),
+			widget.NewFormItem("Interval (hours)", intervalEntry),
+		}
+
+		dialog.ShowForm("Run Session", "Run", "Cancel", formItems, func(b bool) {
+			if !b {
+				return
+			}
+
+			if !scheduleCheck.Checked {
+				// Run immediately
+				runSession()
+				startPolling()
+				showViewMode()
+				return
+			}
+
+			// Schedule run
+			intervalStr := intervalEntry.Text
+			if intervalStr == "" {
+				dialog.ShowError(fmt.Errorf("interval cannot be empty for scheduled run"), window)
+				return
+			}
+
+			interval, err := time.ParseDuration(intervalStr + "h")
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("invalid interval: %w", err), window)
+				return
+			}
+
+			ticker := time.NewTicker(interval)
+			scheduledSessions[session.Id] = ticker
+			go func() {
+				for {
+					select {
+					case <-ticker.C:
+						if session.Status == pb.WorkloadStatus_RUNNING {
+							log.Printf("Session %s is already running. Skipping scheduled run.", session.Id)
+							continue
+						}
+						runSession()
+						startPolling()
+					case <-done:
+						return
+					}
+				}
+			}()
+			statusLabel.SetText(fmt.Sprintf("Status: Scheduled every %s Agent: %s Models: %s", interval, session.AgentId, session.Models))
+			showViewMode()
+		}, window)
 	})
 
-	buttonContainer := container.NewHBox(editButton, saveButton, runButton)
+	stopButton = widget.NewButton("Stop", func() {
+		if ticker, ok := scheduledSessions[session.Id]; ok {
+			ticker.Stop()
+			delete(scheduledSessions, session.Id)
+			statusLabel.SetText(fmt.Sprintf("Status: %s Agent: %s Models: %s", session.Status.String(), session.AgentId, session.Models))
+			showViewMode()
+		}
+	})
+
+	buttonContainer := container.NewHBox(editButton, saveButton, runButton, stopButton)
 
 	content := container.NewStack(viewScroll, editScroll)
 

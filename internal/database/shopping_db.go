@@ -46,3 +46,36 @@ func (db *ShoppingDB) InsertProduct(name string, price float64, date time.Time, 
 	}
 	return nil
 }
+
+type Product struct {
+	ID     int
+	Name   string
+	Price  float64
+	Date   time.Time
+	Source string
+	URL    string
+}
+
+func (db *ShoppingDB) GetAllProducts() ([]*Product, error) {
+	rows, err := db.Query("SELECT id, name, price, date, source, url FROM products")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query products: %w", err)
+	}
+	defer rows.Close()
+
+	var products []*Product
+	for rows.Next() {
+		var p Product
+		var dateStr string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Price, &dateStr, &p.Source, &p.URL); err != nil {
+			return nil, fmt.Errorf("failed to scan product: %w", err)
+		}
+		p.Date, err = time.Parse(time.RFC3339, dateStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse date: %w", err)
+		}
+		products = append(products, &p)
+	}
+
+	return products, nil
+}
