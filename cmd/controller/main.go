@@ -112,8 +112,13 @@ func (m *model) processCommand() {
 		parts := strings.Fields(input)
 		if cmd, ok := commands[parts[0]]; ok {
 			rsm := cmd(m.db, m.workloadChan, parts[1:])
-			m.messages = append(m.messages, string(rsm))
-			m.renderMessages()
+			if rsm == "`clear`" {
+				m.messages = []string{}
+				m.viewport.SetContent("")
+			} else {
+				m.messages = append(m.messages, string(rsm))
+				m.renderMessages()
+			}
 		} else {
 			m.messages = append(m.messages, "Unknown command. Type /help for a list of commands.")
 			m.renderMessages()
@@ -164,11 +169,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) View() string {
+	var errStr string
+	if m.err != nil {
+		errStr = m.err.Error()
+	}
+
 	e := unicode.UTF8.NewEncoder()
 	s, _ := e.String(fmt.Sprintf(
-		"%s\n\n%s",
+		"%s\n\n%s\n%s",
 		m.viewport.View(),
 		m.textarea.View(),
+		errStr,
 	))
 	return s
 }
@@ -230,6 +241,7 @@ func main() {
 		"/help": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
 			helpText := `Available commands: 🇨🇳
  - /help - Show this help message
+ - /clear - Clear the screen
  - /list agent - List all registered agents
  - /list session - List all created sessions
  - /list model - List all registered models
@@ -245,6 +257,9 @@ func main() {
 		"/quit": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
 			os.Exit(0)
 			return "nil"
+		},
+		"/clear": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
+			return responseMsg("`clear`")
 		},
 		"/session": func(db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, args []string) responseMsg {
 			var response responseMsg
@@ -332,7 +347,7 @@ func main() {
 						sessions[currentSession.Id] = currentSession
 						response=(responseMsg(fmt.Sprintf("Saved session with workload ID %s", currentSession.Id)))
 					} else {
-						response=(responseMsg("No active session. Use '/session start <agent-id>' to start one."))
+						response=(responseMsg("No active session. Use '/session start <agent-id> <model-id1,model-id2...>' to start one."))
 					}
 				case "load":
 					if len(args) > 1 {

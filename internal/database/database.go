@@ -2,13 +2,79 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/neo4j/neo4j-go-driver/v4/neo4j"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/nieveai/d-agents/internal/models"
 	pb "github.com/nieveai/d-agents/proto"
 )
+
+var neo4jDriver neo4j.Driver
+
+type Neo4jConfig struct {
+	Uri      string `json:"uri"`
+	Username string `json:"username"`
+}
+
+func GetNeo4jDriver() (neo4j.Driver, error) {
+	if neo4jDriver != nil {
+		return neo4jDriver, nil
+	}
+
+	configFile, err := os.Open("config.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to open config file: %w", err)
+	}
+	defer configFile.Close()
+
+	var config struct {
+		Neo4j Neo4jConfig `json:"neo4j"`
+	}
+	jsonParser := json.NewDecoder(configFile)
+	if err = jsonParser.Decode(&config); err != nil {
+		return nil, fmt.Errorf("failed to decode config file: %w", err)
+	}
+
+	password, err := readPassword("data/neo4j/credentials.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read credentials: %w", err)
+	}
+
+	driver, err := neo4j.NewDriver(config.Neo4j.Uri, neo4j.BasicAuth(config.Neo4j.Username, password, ""))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create neo4j driver: %w", err)
+	}
+
+	neo4jDriver = driver
+	return neo4jDriver, nil
+}
+
+func readPassword(filepath string) (string, error) {
+	data, err := ioutil.ReadFile(filepath)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "password:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "password:")), nil
+		}
+	}
+	return "", fmt.Errorf("password not found in credentials file")
+}
+
+func CloseNeo4jDriver() {
+	if neo4jDriver != nil {
+		neo4jDriver.Close()
+	}
+}
+
 
 type Datastore interface {
 	AddAgent(agent *models.Agent) error

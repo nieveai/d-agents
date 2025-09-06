@@ -1,0 +1,6 @@
+{
+  "id": "agent-2",
+  "name": "Shopping Agent",
+  "description": "an agent for shopping",
+  "type": "ShoppingAgent"
+}
