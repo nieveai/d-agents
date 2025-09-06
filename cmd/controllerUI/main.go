@@ -405,7 +405,11 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 
 func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workloadChan chan<- *pb.Workload, refreshChan chan bool, tabs *container.AppTabs, tab *container.TabItem) fyne.CanvasObject {
 	label := widget.NewLabel(fmt.Sprintf("Session: %s", session.Name))
+	statusLabel := widget.NewLabel(fmt.Sprintf("Status: %s", session.Status.String()))
+	done := make(chan struct{})
+
 	closeButton := widget.NewButton("X", func() {
+		close(done)
 		tabs.Remove(tab)
 		delete(openSessionTabs, session.Id)
 	})
@@ -441,6 +445,46 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 		runButton.Show()
 	}
 
+	var startPolling func()
+	startPolling = func() {
+		go func() {
+			if session.Status != pb.WorkloadStatus_RUNNING {
+				return
+			}
+
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					log.Printf("Checking status for session %s", session.Id)
+					newSession, err := db.GetSession(session.Id)
+					if err != nil {
+						log.Printf("Error checking session %s: %s", session.Id, err)
+						continue
+					}
+
+					if newSession.Status != pb.WorkloadStatus_RUNNING {
+						session.Status = newSession.Status
+						statusLabel.SetText(fmt.Sprintf("Status: %s", session.Status.String()))
+
+						if newSession.Status == pb.WorkloadStatus_COMPLETED {
+							log.Printf("Session %s completed. Reloading payload.", session.Id)
+							session.Payload = newSession.Payload
+							richText.ParseMarkdown(string(session.Payload))
+							payloadBinding.Set(string(session.Payload))
+						}
+						return // Stop polling
+					}
+				case <-done:
+					log.Printf("Stopping refresh for session %s", session.Id)
+					return
+				}
+			}
+		}()
+	}
+
 	editButton = widget.NewButton("Edit", showEditMode)
 	saveButton = widget.NewButton("Save", func() {
 		text, _ := payloadBinding.Get()
@@ -453,11 +497,14 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 	runButton = widget.NewButton("Run", func() {
 		text, _ := payloadBinding.Get()
 		session.Payload = []byte(text)
+		session.Status = pb.WorkloadStatus_RUNNING
 		db.AddSession(session)
 		richText.ParseMarkdown(string(session.Payload))
+		statusLabel.SetText(fmt.Sprintf("Status: %s", session.Status.String()))
 		workloadChan <- session
 		showViewMode()
 		refreshChan <- true
+		startPolling()
 	})
 
 	buttonContainer := container.NewHBox(editButton, saveButton, runButton)
@@ -465,10 +512,11 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 	content := container.NewStack(viewScroll, editScroll)
 
 	showViewMode()
+	startPolling()
 
 	return container.NewBorder(
 		container.NewBorder(nil, nil, nil, container.NewHBox(buttonContainer, closeButton), label),
-		nil,
+		statusLabel,
 		nil,
 		nil,
 		content,
