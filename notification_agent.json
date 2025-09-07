@@ -1,0 +1,6 @@
+{
+  "id": "shopping notification",
+  "name": "Shopping Notification Agent",
+  "description": "an agent for shopping notification",
+  "type": "ShoppingNotificationAgent"
+}

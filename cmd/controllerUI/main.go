@@ -223,11 +223,11 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 		log.Printf("Error loading sessions from database: %s", err)
 	}
 
-	columnWidths := []float32{150, 100, 250, 300, 50}
+	columnWidths := []float32{150, 100, 250, 300, 50, 50}
 	var table *widget.Table
 	table = widget.NewTable(
 		func() (int, int) {
-			return len(sessions) + 1, 5 // Add 1 for header row, 5 columns
+			return len(sessions) + 1, 6 // Add 1 for header row, 6 columns
 		},
 		func() fyne.CanvasObject {
 			return widget.NewLabel("template")
@@ -247,12 +247,14 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 					label.SetText("Payload")
 				case 4:
 					label.SetText("Action")
+				case 5:
+					label.SetText("Delete")
 				}
 				return
 			}
 
 			// Data rows
-			if id.Col == 3 { // Payload column
+			if id.Col == 0 || id.Col == 3 { // Name or Payload column
 				label.Wrapping = fyne.TextWrapWord
 			} else { // Other columns
 				label.Wrapping = fyne.TextWrapOff
@@ -282,7 +284,8 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 
 			case 4:
 				label.SetText("Load")
-
+			case 5:
+				label.SetText("Delete")
 			}
 		},
 	)
@@ -302,6 +305,23 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 				tabs.Append(tab)
 				tabs.Select(tab)
 			}
+		}
+		if id.Row > 0 && id.Col == 5 {
+			session := sessions[id.Row-1]
+			dialog.ShowConfirm("Delete Session", fmt.Sprintf("Are you sure you want to delete session '%s'?", session.Name), func(b bool) {
+				if !b {
+					return
+				}
+				if err := db.DeleteSession(session.Id); err != nil {
+					dialog.ShowError(err, window)
+					return
+				}
+				if tab, ok := openSessionTabs[session.Id]; ok {
+					tabs.Remove(tab)
+					delete(openSessionTabs, session.Id)
+				}
+				refreshChan <- true
+			}, window)
 		}
 		table.Unselect(id)
 	}
@@ -336,6 +356,8 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 		selectedModels := []*amodels.Model{}
 		sessionNameEntry := widget.NewEntry()
 		sessionNameEntry.SetPlaceHolder("Enter session name...")
+		configEntry := widget.NewMultiLineEntry()
+		configEntry.SetPlaceHolder("Enter config JSON...")
 
 		agentSelect := widget.NewSelect(agentNames(agents), func(s string) {
 			for _, a := range agents {
@@ -362,6 +384,7 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 			widget.NewFormItem("Session Name", sessionNameEntry),
 			widget.NewFormItem("Agent", agentSelect),
 			widget.NewFormItem("Models", modelCheck),
+			widget.NewFormItem("Config", configEntry),
 		}, func(b bool) {
 			if !b {
 				return
@@ -385,6 +408,7 @@ func makeSessionsTab(db *database.SQLiteDatastore, tabs *container.AppTabs, work
 				Models:    modelIDs,
 				Timestamp: time.Now().Unix(),
 				Status:    pb.WorkloadStatus_PENDING,
+				Config:    configEntry.Text,
 			}
 			tab := container.NewTabItem(newSession.Name, nil)
 			tab.Content = makeSessionTab(newSession, db, workloadChan, refreshChan, tabs, tab, window)
@@ -431,11 +455,20 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 	payloadEntry.MultiLine = true
 	editScroll := container.NewScroll(payloadEntry)
 
+	configBinding := binding.NewString()
+	configBinding.Set(session.Config)
+	configEntry := widget.NewEntryWithData(configBinding)
+	configEntry.MultiLine = true
+	configScroll := container.NewScroll(configEntry)
+	configPane := container.NewBorder(widget.NewLabel("Config"), nil, nil, nil, configScroll)
+
 	var editButton, saveButton, runButton, stopButton *widget.Button
 
 	runSession := func() {
 		text, _ := payloadBinding.Get()
 		session.Payload = []byte(text)
+		configText, _ := configBinding.Get()
+		session.Config = configText
 		session.Status = pb.WorkloadStatus_RUNNING
 		db.AddSession(session)
 		richText.ParseMarkdown(string(session.Payload))
@@ -448,6 +481,7 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 	showViewMode := func() {
 		viewScroll.Show()
 		editScroll.Hide()
+		configPane.Hide()
 		editButton.Show()
 		saveButton.Hide()
 		runButton.Show()
@@ -463,6 +497,7 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 	showEditMode := func() {
 		viewScroll.Hide()
 		editScroll.Show()
+		configPane.Show()
 		editButton.Hide()
 		saveButton.Show()
 		runButton.Show()
@@ -513,6 +548,8 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 	saveButton = widget.NewButton("Save", func() {
 		text, _ := payloadBinding.Get()
 		session.Payload = []byte(text)
+		configText, _ := configBinding.Get()
+		session.Config = configText
 		db.AddSession(session)
 		richText.ParseMarkdown(string(session.Payload))
 		showViewMode()
@@ -595,7 +632,7 @@ func makeSessionTab(session *pb.Workload, db *database.SQLiteDatastore, workload
 
 	buttonContainer := container.NewHBox(editButton, saveButton, runButton, stopButton)
 
-	content := container.NewStack(viewScroll, editScroll)
+	content := container.NewStack(viewScroll, container.NewVSplit(editScroll, configPane))
 
 	showViewMode()
 	startPolling()

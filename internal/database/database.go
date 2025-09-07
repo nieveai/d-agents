@@ -222,6 +222,11 @@ func (db *SQLiteDatastore) ListSessions() ([]*pb.Workload, error) {
 	return sessions, nil
 }
 
+func (db *SQLiteDatastore) DeleteSession(id string) error {
+	_, err := db.db.Exec("DELETE FROM sessions WHERE id = ?", id)
+	return err
+}
+
 func (db *SQLiteDatastore) AddModel(model *models.Model) error {
 	_, err := db.db.Exec("INSERT INTO models (id, provider, api_key, model_id, api_url, api_spec) VALUES (?, ?, ?, ?, ?, ?)", model.ID, model.Provider, model.APIKey, model.ModelID, model.APIURL, model.APISpec)
 	return err

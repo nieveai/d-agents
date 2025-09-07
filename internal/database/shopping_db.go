@@ -53,7 +53,7 @@ type Product struct {
 	Price  float64
 	Date   time.Time
 	Source string
-	URL    string
+	URL    sql.NullString
 }
 
 func (db *ShoppingDB) GetAllProducts() ([]*Product, error) {

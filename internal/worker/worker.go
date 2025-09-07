@@ -54,6 +54,12 @@ func ProcessWorkload(workload *pb.Workload) {
 			log.Printf("Error creating ShoppingAgent: %s", err)
 			return
 		}
+	case "ShoppingNotificationAgent":
+		agent, err = agents.NewShoppingNotificationAgent()
+		if err != nil {
+			log.Printf("Error creating ShoppingNotificationAgent: %s", err)
+			return
+		}
 	default:
 		log.Printf("Unknown agent type: %s", workload.AgentType)
 		return

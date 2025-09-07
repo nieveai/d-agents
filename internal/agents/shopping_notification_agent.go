@@ -1,8 +1,12 @@
 package agents
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"net/smtp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/nieveai/d-agents/internal/database"
@@ -14,12 +18,34 @@ type ShoppingNotificationAgent struct {
 	Db *database.ShoppingDB
 }
 
+type SmtpConfig struct {
+	From     string `json:"from"`
+	Password string `json:"password"`
+	To       string `json:"to"`
+	SmtpHost string `json:"smtp_host"`
+	SmtpPort string `json:"smtp_port"`
+}
+
 func NewShoppingNotificationAgent() (*ShoppingNotificationAgent, error) {
 	db, err := database.NewShoppingDB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get shopping db: %w", err)
 	}
 	return &ShoppingNotificationAgent{Db: db}, nil
+}
+
+func (a *ShoppingNotificationAgent) sendEmail(body string, config SmtpConfig) error {
+	msg := []byte("To: " + config.To + "\r\n" +
+		"Subject: Nieve AI Alert!\r\n" +
+		"\r\n" +
+		body + "\r\n")
+
+	auth := smtp.PlainAuth("", config.From, config.Password, config.SmtpHost)
+	err := smtp.SendMail(config.SmtpHost+":"+config.SmtpPort, auth, config.From, []string{config.To}, msg)
+	if err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
+	}
+	return nil
 }
 
 func (a *ShoppingNotificationAgent) DoWork(workload *pb.Workload, genAIClient m.GenAIClient) error {
@@ -45,20 +71,24 @@ func (a *ShoppingNotificationAgent) DoWork(workload *pb.Workload, genAIClient m.
 			continue
 		}
 
-		// Find the lowest price in the most recent period
+		// Find the product with the lowest price in the most recent period
 		mostRecentPeriod := productList[len(productList)-1].Date
-		var recentPrices []float64
+		var recentProducts []*database.Product
 		for _, p := range productList {
 			if p.Date.Equal(mostRecentPeriod) {
-				recentPrices = append(recentPrices, p.Price)
+				recentProducts = append(recentProducts, p)
 			}
 		}
-		lowestRecentPrice := recentPrices[0]
-		for _, price := range recentPrices {
-			if price < lowestRecentPrice {
-				lowestRecentPrice = price
+		if len(recentProducts) == 0 {
+			continue
+		}
+		lowestRecentProduct := recentProducts[0]
+		for _, p := range recentProducts {
+			if p.Price < lowestRecentProduct.Price {
+				lowestRecentProduct = p
 			}
 		}
+		lowestRecentPrice := lowestRecentProduct.Price
 
 		// Find the lowest price in the previous period
 		previousPeriod := time.Time{}
@@ -79,7 +109,9 @@ func (a *ShoppingNotificationAgent) DoWork(workload *pb.Workload, genAIClient m.
 				previousPrices = append(previousPrices, p.Price)
 			}
 		}
-
+		if len(previousPrices) == 0 {
+			continue
+		}
 		lowestPreviousPrice := previousPrices[0]
 		for _, price := range previousPrices {
 			if price < lowestPreviousPrice {
@@ -88,15 +120,35 @@ func (a *ShoppingNotificationAgent) DoWork(workload *pb.Workload, genAIClient m.
 		}
 
 		if lowestRecentPrice < lowestPreviousPrice {
-			notifications = append(notifications, fmt.Sprintf("Price drop for %s: $%.2f (was $%.2f)", name, lowestRecentPrice, lowestPreviousPrice))
+			url := "N/A"
+			if lowestRecentProduct.URL.Valid {
+				url = lowestRecentProduct.URL.String
+			}
+			notifications = append(notifications, fmt.Sprintf("Price drop for %s: $%.2f (was $%.2f). URL: %s", name, lowestRecentPrice, lowestPreviousPrice, url))
 		}
 	}
 
 	if len(notifications) > 0 {
-		workload.Payload = []byte(fmt.Sprintf("Price drop alerts:\n%s", notifications))
+		message := strings.Join(notifications, "\n")
+		fullMessage := fmt.Sprintf("Nieve AI alerts:\n%s", message)
+		workload.Payload = []byte(fullMessage)
+
+		if workload.Config != "" {
+			var config SmtpConfig
+			if err := json.Unmarshal([]byte(workload.Config), &config); err != nil {
+				log.Printf("Failed to unmarshal SMTP config: %v", err)
+			} else {
+				if err := a.sendEmail(fullMessage, config); err != nil {
+					log.Printf("Failed to send notification email: %v", err)
+				}
+			}
+		} else {
+			log.Println("SMTP config not found in workload, skipping email notification.")
+		}
 	} else {
 		workload.Payload = []byte("No price drops detected.")
 	}
 
 	return nil
 }
+
